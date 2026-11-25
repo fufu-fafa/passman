@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Debug builds allow adb screenshots for testing; recents previews stay hidden. -->
+    <bool name="secure_window">false</bool>
+</resources>
