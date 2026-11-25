@@ -1,5 +1,6 @@
 package app.passman
 
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -7,6 +8,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import app.passman.ui.PassManRoot
@@ -25,7 +27,11 @@ class MainActivity : ComponentActivity() {
         }
         // No system autofill prompts to save or fill PassMan's own fields.
         window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-        enableEdgeToEdge()
+        // Dark-only theme: always light system-bar icons.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
         setContent {
             PassManTheme {
                 PassManRoot(

@@ -1,66 +1,69 @@
 package app.passman.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 
-private val Light = lightColorScheme(
-    primary = Color(0xFF1F5B4C),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFCDE8DC),
-    onPrimaryContainer = Color(0xFF0B2B22),
-    secondary = Color(0xFF5E6B63),
-    secondaryContainer = Color(0xFFE2E8E2),
-    onSecondaryContainer = Color(0xFF1B231E),
-    tertiary = Color(0xFF8A5A12),
-    tertiaryContainer = Color(0xFFFBE3BC),
-    onTertiaryContainer = Color(0xFF2C1A00),
-    background = Color(0xFFF7F5F0),
-    onBackground = Color(0xFF1B1C1A),
-    surface = Color(0xFFF7F5F0),
-    onSurface = Color(0xFF1B1C1A),
-    surfaceVariant = Color(0xFFE4E3DC),
-    onSurfaceVariant = Color(0xFF47483F),
-    surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFF2F0EA),
-    surfaceContainer = Color(0xFFEDEBE4),
-    surfaceContainerHigh = Color(0xFFE7E5DE),
-    surfaceContainerHighest = Color(0xFFE1DFD8),
-    outline = Color(0xFF787970),
-    outlineVariant = Color(0xFFC8C7BE),
-    error = Color(0xFFB3261E),
-    errorContainer = Color(0xFFF9DEDC),
-    onErrorContainer = Color(0xFF410E0B),
-)
+// Palette shared with ssh_terminal (GitHub-dark style). Dark only, like that app.
+private val Bg = Color(0xFF0D1117)
+private val Surface = Color(0xFF161B22)
+private val Border = Color(0xFF30363D)
+private val Accent = Color(0xFF3FB950)
+private val Text = Color(0xFFE6EDF3)
+private val TextDim = Color(0xFF8B949E)
+private val Error = Color(0xFFF85149)
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFF8FD3BC),
-    onPrimary = Color(0xFF00382C),
-    primaryContainer = Color(0xFF1F5B4C),
-    onPrimaryContainer = Color(0xFFCDE8DC),
-    secondary = Color(0xFFBCC9C0),
-    secondaryContainer = Color(0xFF3A443E),
-    onSecondaryContainer = Color(0xFFDDE6DE),
-    tertiary = Color(0xFFF0BF6E),
-    tertiaryContainer = Color(0xFF5F3F00),
-    onTertiaryContainer = Color(0xFFFFDDB0),
-    background = Color(0xFF121412),
-    onBackground = Color(0xFFE3E3DE),
-    surface = Color(0xFF121412),
-    onSurface = Color(0xFFE3E3DE),
-    surfaceVariant = Color(0xFF45483F),
-    onSurfaceVariant = Color(0xFFC6C7BE),
-    surfaceContainerLowest = Color(0xFF0D0F0D),
-    surfaceContainerLow = Color(0xFF1A1C1A),
-    surfaceContainer = Color(0xFF1E201E),
-    surfaceContainerHigh = Color(0xFF282A28),
-    surfaceContainerHighest = Color(0xFF333533),
-    outline = Color(0xFF90918A),
-    outlineVariant = Color(0xFF45483F),
+    primary = Accent,
+    onPrimary = Bg,
+    primaryContainer = Color(0xFF1B3A24),
+    onPrimaryContainer = Color(0xFFAFF5B4),
+    inversePrimary = Color(0xFF1A7F37),
+    secondary = TextDim,
+    onSecondary = Bg,
+    secondaryContainer = Color(0xFF21262D),
+    onSecondaryContainer = Text,
+    tertiary = Color(0xFFD29922),
+    onTertiary = Bg,
+    tertiaryContainer = Color(0xFF3B2E0A),
+    onTertiaryContainer = Color(0xFFF8E3A1),
+    background = Bg,
+    onBackground = Text,
+    surface = Bg,
+    onSurface = Text,
+    surfaceVariant = Surface,
+    onSurfaceVariant = TextDim,
+    surfaceTint = Accent,
+    inverseSurface = Text,
+    inverseOnSurface = Bg,
+    surfaceContainerLowest = Color(0xFF010409),
+    surfaceContainerLow = Color(0xFF11161D),
+    surfaceContainer = Surface,
+    surfaceContainerHigh = Color(0xFF1C2128),
+    surfaceContainerHighest = Color(0xFF21262D),
+    surfaceBright = Color(0xFF262C36),
+    surfaceDim = Bg,
+    outline = TextDim,
+    outlineVariant = Border,
+    error = Error,
+    onError = Bg,
+    errorContainer = Color(0xFF3D1214),
+    onErrorContainer = Color(0xFFFFDCD7),
+    scrim = Color.Black,
+)
+
+// ssh_terminal's buttons and fields use 10dp corners.
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(10.dp),
+    large = RoundedCornerShape(14.dp),
+    extraLarge = RoundedCornerShape(20.dp),
 )
 
 /** Monospace for secrets so similar characters (l, 1, I, O, 0) stay distinguishable. */
@@ -68,5 +71,5 @@ val SecretFont = FontFamily.Monospace
 
 @Composable
 fun PassManTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+    MaterialTheme(colorScheme = Dark, shapes = AppShapes, content = content)
 }
