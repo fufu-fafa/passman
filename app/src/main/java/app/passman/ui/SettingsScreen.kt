@@ -4,7 +4,9 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.biometric.BiometricManager
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Password
 import androidx.compose.material.icons.outlined.Restore
@@ -27,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -41,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import app.passman.data.UnlockResult
@@ -60,6 +65,8 @@ fun SettingsScreen(vault: VaultRepository, onBack: () -> Unit) {
     val state by vault.state.collectAsState()
     val count = (state as? VaultState.Unlocked)?.entries?.size ?: 0
     var changePassword by remember { mutableStateOf(false) }
+    val bioEnabled by vault.biometricEnabled.collectAsState()
+    var bioBusy by remember { mutableStateOf(false) }
     val restore = rememberRestoreFlow(vault, currentEntryCount = count, onRestored = onBack)
 
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
@@ -90,6 +97,63 @@ fun SettingsScreen(vault: VaultRepository, onBack: () -> Unit) {
                 vault.lock()
             }
             SettingRow(Icons.Outlined.Password, "Change master password", "You'll need your current one") { changePassword = true }
+            val bioAvailability = vault.biometricAvailability()
+            if (bioEnabled || (bioAvailability != BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE &&
+                    bioAvailability != BiometricManager.BIOMETRIC_ERROR_UNSUPPORTED)
+            ) {
+                SwitchRow(
+                    Icons.Outlined.Fingerprint,
+                    "Unlock with fingerprint",
+                    "Your master password still works and is needed for backups.",
+                    checked = bioEnabled,
+                    enabled = !bioBusy,
+                ) { turnOn ->
+                    if (!turnOn) {
+                        vault.disableBiometric()
+                        notify("Fingerprint unlock is off")
+                        return@SwitchRow
+                    }
+                    when (vault.biometricAvailability()) {
+                        BiometricManager.BIOMETRIC_SUCCESS -> Unit
+                        BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
+                            notify("Add a fingerprint in Android settings first")
+                            return@SwitchRow
+                        }
+                        else -> {
+                            notify("Fingerprint unlock isn't available on this phone right now")
+                            return@SwitchRow
+                        }
+                    }
+                    bioBusy = true
+                    scope.launch {
+                        try {
+                            val cipher = vault.prepareBiometricEnable()
+                            val outcome = context.findFragmentActivity().authenticate(
+                                cipher,
+                                title = "Turn on fingerprint unlock",
+                                subtitle = "Touch the sensor to confirm",
+                                negativeText = "Cancel",
+                            )
+                            when (outcome) {
+                                is BiometricOutcome.Success -> {
+                                    vault.enableBiometric(outcome.cipher)
+                                    notify("Fingerprint unlock is on")
+                                }
+                                BiometricOutcome.Cancelled -> vault.disableBiometric()
+                                is BiometricOutcome.Error -> {
+                                    vault.disableBiometric()
+                                    notify(outcome.message)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            vault.disableBiometric()
+                            notify("Couldn't turn on fingerprint unlock")
+                        } finally {
+                            bioBusy = false
+                        }
+                    }
+                }
+            }
 
             Section("Backup")
             SettingRow(Icons.Outlined.Download, "Export encrypted backup", "Saves a file protected by your current master password") {
@@ -130,6 +194,33 @@ private fun Section(title: String) {
 }
 
 @Composable
+private fun SwitchRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.size(20.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.size(12.dp))
+        // The whole row toggles; the switch itself only shows the state.
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+    }
+}
+
+@Composable
 private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 14.dp),
@@ -164,6 +255,7 @@ private fun ChangePasswordDialog(vault: VaultRepository, onDone: () -> Unit) {
         attempted = true
         if (!valid || busy) return
         busy = true
+        val hadFingerprint = vault.biometricEnabled.value
         val currentChars = current.toPasswordChars()
         // Drop the typed current password now; changePassword() zeroes both arrays when done.
         current = ""
@@ -178,7 +270,10 @@ private fun ChangePasswordDialog(vault: VaultRepository, onDone: () -> Unit) {
             busy = false
             when (result) {
                 UnlockResult.Success -> {
-                    notify("Master password changed")
+                    notify(
+                        if (hadFingerprint) "Master password changed. Fingerprint unlock was turned off; you can turn it on again."
+                        else "Master password changed",
+                    )
                     onDone()
                 }
                 UnlockResult.WrongPassword -> currentError = "Wrong current password"

@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import javax.crypto.Cipher
 import java.io.OutputStream
 
 sealed interface VaultState {
@@ -38,6 +39,16 @@ sealed interface UnlockResult {
 /** Too many wrong master passwords; try again after [waitMillis] (SEC-8). */
 class ThrottledException(val waitMillis: Long) : Exception("Too many attempts")
 
+sealed interface BiometricUnlockResult {
+    data object Success : BiometricUnlockResult
+
+    /**
+     * Fingerprint unlock was turned off: the fingerprints changed (the Keystore key is gone) or
+     * the stored key no longer opens the vault. The master password still works.
+     */
+    data object TurnedOff : BiometricUnlockResult
+}
+
 /** A backup that decrypted successfully and is waiting for the user's confirmation to restore. */
 class PendingRestore internal constructor(internal val file: ByteArray, internal val opened: OpenedVault) {
     val entryCount: Int get() = opened.entries.size
@@ -51,6 +62,7 @@ class PendingRestore internal constructor(internal val file: ByteArray, internal
 class VaultRepository(context: Context, private val kdfParams: KdfParams = KdfParams.DEFAULT) {
     private val resolver = context.contentResolver
     private val store = VaultFileStore(context.filesDir)
+    private val biometric = BiometricKeyStore(context)
     private val prefs = context.getSharedPreferences("passman", Context.MODE_PRIVATE)
     private val writeMutex = Mutex()
 
@@ -63,6 +75,11 @@ class VaultRepository(context: Context, private val kdfParams: KdfParams = KdfPa
     val state: StateFlow<VaultState> = _state.asStateFlow()
 
     val isUnlocked: Boolean get() = _state.value is VaultState.Unlocked
+
+    private val _biometricEnabled = MutableStateFlow(biometric.hasBlob())
+
+    /** Whether fingerprint unlock is turned on (a wrapped key is stored). */
+    val biometricEnabled: StateFlow<Boolean> = _biometricEnabled.asStateFlow()
 
     // ---- Preferences that hold no entry data ----
 
@@ -110,6 +127,7 @@ class VaultRepository(context: Context, private val kdfParams: KdfParams = KdfPa
         try {
             writeMutex.withLock {
                 check(!store.exists()) { "Vault already exists" }
+                disableBiometric()
                 val (bytes, newKeys) = VaultCrypto.create(password, emptyList(), kdfParams)
                 withContext(Dispatchers.IO) { store.write(bytes) }
                 keys = newKeys
@@ -129,10 +147,7 @@ class VaultRepository(context: Context, private val kdfParams: KdfParams = KdfPa
             val opened = VaultCrypto.open(bytes, password)
             // Timing only (no entry data); release builds strip Log calls.
             android.util.Log.d("PassMan", "unlock took ${SystemClock.elapsedRealtime() - started} ms")
-            resetFailures()
-            keys?.destroy()
-            keys = opened.keys
-            _state.value = VaultState.Unlocked(opened.entries)
+            adopt(opened)
             UnlockResult.Success
         } catch (e: WrongPasswordException) {
             recordFailure()
@@ -142,6 +157,91 @@ class VaultRepository(context: Context, private val kdfParams: KdfParams = KdfPa
         } finally {
             password.fill('\u0000')
         }
+    }
+
+    /** Makes [opened] the unlocked vault. The one place a successful unlock resets SEC-8. */
+    private fun adopt(opened: OpenedVault) {
+        resetFailures()
+        keys?.destroy()
+        keys = opened.keys
+        _state.value = VaultState.Unlocked(opened.entries)
+    }
+
+    // ---- Fingerprint unlock (a second, Keystore-protected wrap of the same vault key) ----
+
+    /** A `BiometricManager` status code; `BIOMETRIC_SUCCESS` when a strong fingerprint is usable. */
+    fun biometricAvailability(): Int = biometric.availability()
+
+    /**
+     * Step 1 of turning fingerprint unlock on: makes a new Keystore key and returns the cipher for
+     * the fingerprint prompt. Pass the authenticated cipher to [enableBiometric], or call
+     * [disableBiometric] if the prompt is cancelled.
+     */
+    suspend fun prepareBiometricEnable(): Cipher = withContext(Dispatchers.IO) {
+        check(!_biometricEnabled.value) { "Fingerprint unlock is already on" }
+        biometric.createEncryptCipher()
+    }
+
+    /** Step 2: wraps the vault key with the fingerprint-authorized [cipher]. */
+    suspend fun enableBiometric(cipher: Cipher) = withContext(Dispatchers.IO) {
+        val k = keys ?: throw IllegalStateException("Vault is locked")
+        val raw = k.exportKeyCopy()
+        try {
+            biometric.store(cipher, raw)
+            _biometricEnabled.value = true
+        } catch (e: Exception) {
+            disableBiometric()
+            throw e
+        } finally {
+            raw.fill(0)
+        }
+    }
+
+    /**
+     * The cipher for the unlock prompt, or null when fingerprint unlock was just turned off
+     * because the fingerprints changed.
+     */
+    suspend fun prepareBiometricUnlock(): Cipher? = withContext(Dispatchers.IO) {
+        try {
+            biometric.createDecryptCipher()
+        } catch (e: BiometricInvalidatedException) {
+            _biometricEnabled.value = false
+            null
+        }
+    }
+
+    /**
+     * Unlocks with the fingerprint-authorized [cipher]. No Argon2id, so it's fast. Fingerprint
+     * failures don't count toward SEC-8 (Android has its own lockout). A stored key that no
+     * longer opens the vault turns fingerprint unlock off; it is never reported as a damaged
+     * vault, and the vault file is never written here.
+     */
+    suspend fun unlockWithBiometric(cipher: Cipher): BiometricUnlockResult = withContext(Dispatchers.Default) {
+        val raw = try {
+            biometric.unwrap(cipher)
+        } catch (e: BiometricInvalidatedException) {
+            _biometricEnabled.value = false
+            return@withContext BiometricUnlockResult.TurnedOff
+        }
+        try {
+            val bytes = withContext(Dispatchers.IO) { store.read() }
+            val opened = try {
+                VaultCrypto.openWithKey(bytes, raw)
+            } catch (e: CorruptVaultException) {
+                disableBiometric()
+                return@withContext BiometricUnlockResult.TurnedOff
+            }
+            adopt(opened)
+            BiometricUnlockResult.Success
+        } finally {
+            raw.fill(0)
+        }
+    }
+
+    /** Turns fingerprint unlock off: deletes the wrapped key and the Keystore key. */
+    fun disableBiometric() {
+        biometric.disable()
+        _biometricEnabled.value = false
     }
 
     /** SEC-6: forget the key and every decrypted entry. Safe to call at any time, from any thread. */
@@ -192,7 +292,8 @@ class VaultRepository(context: Context, private val kdfParams: KdfParams = KdfPa
 
     /**
      * FR-13. Returns [UnlockResult.WrongPassword] when [current] is wrong; wrong guesses count
-     * toward the same SEC-8 delay as the unlock screen. A new vault key and salt replace the old.
+     * toward the same SEC-8 delay as the unlock screen. A new vault key and salt replace the old,
+     * which turns fingerprint unlock off.
      * [UnlockResult.Damaged] is never returned: a damaged file throws [CorruptVaultException].
      */
     suspend fun changePassword(current: CharArray, new: CharArray): UnlockResult = withContext(Dispatchers.Default) {
@@ -213,6 +314,8 @@ class VaultRepository(context: Context, private val kdfParams: KdfParams = KdfPa
                 val entries = (_state.value as? VaultState.Unlocked)?.entries ?: throw IllegalStateException("Vault is locked")
                 val (newBytes, newKeys) = VaultCrypto.create(new, entries, kdfParams)
                 withContext(Dispatchers.IO) { store.write(newBytes) }
+                // The new vault key isn't wrapped for the fingerprint; the user turns it on again.
+                disableBiometric()
                 if (keys === k) {
                     keys = newKeys
                     k.destroy()
@@ -261,6 +364,8 @@ class VaultRepository(context: Context, private val kdfParams: KdfParams = KdfPa
     suspend fun restore(pending: PendingRestore) = withContext(Dispatchers.Default) {
         writeMutex.withLock {
             withContext(Dispatchers.IO) { store.write(pending.file) }
+            // The backup has its own vault key; the fingerprint wrap is for the old one.
+            disableBiometric()
             val old = keys
             keys = pending.opened.keys
             old?.destroy()

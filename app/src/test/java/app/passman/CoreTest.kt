@@ -134,6 +134,53 @@ class CoreTest {
         }
     }
 
+    // ---- Open with the raw vault key (fingerprint unlock) ----
+
+    @Test fun `openWithKey round-trips with the exported key`() {
+        val (file, keys) = VaultCrypto.create(pw, listOf(tricky), fast)
+        val raw = keys.exportKeyCopy()
+        val opened = VaultCrypto.openWithKey(file, raw)
+        assertEquals(listOf(tricky), opened.entries)
+        // The opened keys own a copy: zeroing ours doesn't break them.
+        raw.fill(0)
+        assertEquals(listOf(tricky), VaultCrypto.open(VaultCrypto.seal(opened.keys, opened.entries), pw).entries)
+    }
+
+    @Test fun `openWithKey with the wrong key is a corrupt vault`() {
+        val (file, _) = VaultCrypto.create(pw, listOf(tricky), fast)
+        val (_, other) = VaultCrypto.create(pw, emptyList(), fast)
+        for (key in listOf(other.exportKeyCopy(), ByteArray(32), ByteArray(16))) {
+            try {
+                VaultCrypto.openWithKey(file, key)
+                fail()
+            } catch (e: CorruptVaultException) {
+            }
+        }
+    }
+
+    @Test fun `openWithKey rejects every single-byte change`() {
+        val (file, keys) = VaultCrypto.create(pw, listOf(tricky), fast)
+        val raw = keys.exportKeyCopy()
+        for (i in file.indices) {
+            val bad = file.copyOf().also { it[i] = (it[i].toInt() xor 0x01).toByte() }
+            try {
+                VaultCrypto.openWithKey(bad, raw)
+                fail("byte $i accepted")
+            } catch (e: CorruptVaultException) {
+            }
+        }
+    }
+
+    @Test fun `exportKeyCopy refuses after destroy`() {
+        val (_, keys) = VaultCrypto.create(pw, emptyList(), fast)
+        keys.destroy()
+        try {
+            keys.exportKeyCopy()
+            fail()
+        } catch (e: IllegalStateException) {
+        }
+    }
+
     @Test fun `memory cost above 256 MiB is refused and 256 MiB is accepted`() {
         val (file, _) = VaultCrypto.create(pw, emptyList(), fast)
         fun withMemory(kib: Int) = file.copyOf().also { java.nio.ByteBuffer.wrap(it).putInt(5, kib) }

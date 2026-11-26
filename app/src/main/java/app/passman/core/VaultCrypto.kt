@@ -59,6 +59,10 @@ class VaultKeys internal constructor(
 
     val isDestroyed: Boolean @Synchronized get() = destroyed
 
+    /** A copy of the raw vault key, for wrapping with a fingerprint-bound key. Caller zeroes it. */
+    @Synchronized
+    internal fun exportKeyCopy(): ByteArray = useKey { it.copyOf() }
+
     @Synchronized
     fun destroy() {
         destroyed = true
@@ -178,6 +182,22 @@ object VaultCrypto {
             vaultKey.fill(0)
             throw CorruptVaultException("Bad key length")
         }
+        return openData(file, header, vaultKey)
+    }
+
+    /**
+     * Opens [file] with the raw [vaultKey] (fingerprint unlock), skipping Argon2id. The key is
+     * copied; the caller zeroes its own array.
+     * @throws CorruptVaultException if the file is malformed, was changed, or [vaultKey] isn't its key
+     */
+    fun openWithKey(file: ByteArray, vaultKey: ByteArray): OpenedVault {
+        val header = parseHeader(file)
+        if (vaultKey.size != KEY_LEN) throw CorruptVaultException("Bad key length")
+        return openData(file, header, vaultKey.copyOf())
+    }
+
+    /** Decrypts the entries with [vaultKey], which the returned keys take ownership of. */
+    private fun openData(file: ByteArray, header: Header, vaultKey: ByteArray): OpenedVault {
         val keys = VaultKeys(vaultKey, file.copyOfRange(0, header.keyHeaderEnd), header.params)
         try {
             val aad = file.copyOfRange(0, header.dataStart)

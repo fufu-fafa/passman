@@ -13,20 +13,24 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -36,14 +40,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.biometric.BiometricManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.passman.data.BiometricUnlockResult
 import app.passman.data.UnlockResult
 import app.passman.data.VaultRepository
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
@@ -165,9 +175,54 @@ fun UnlockScreen(vault: VaultRepository, onCloseApp: () -> Unit) {
     var waitMillis by remember { mutableLongStateOf(vault.unlockWaitMillis()) }
     val focus = remember { FocusRequester() }
     val restore = rememberRestoreFlow(vault, currentEntryCount = null)
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val bioEnabled by vault.biometricEnabled.collectAsState()
+    val bioUsable = bioEnabled && remember(bioEnabled) { vault.biometricAvailability() == BiometricManager.BIOMETRIC_SUCCESS }
+    var bioMessage by remember { mutableStateOf<String?>(null) }
+    var bioBusy by remember { mutableStateOf(false) }
+
+    fun useFingerprint() {
+        if (busy || bioBusy) return
+        bioBusy = true
+        bioMessage = null
+        scope.launch {
+            try {
+                val cipher = vault.prepareBiometricUnlock()
+                if (cipher == null) {
+                    bioMessage = "Fingerprint unlock was turned off because the fingerprints on this phone changed. " +
+                        "Unlock with your master password, then turn it on again in Settings."
+                    return@launch
+                }
+                when (val outcome = context.findFragmentActivity().authenticate(cipher, "Unlock PassMan", null, "Use master password")) {
+                    is BiometricOutcome.Success -> {
+                        busy = true
+                        if (vault.unlockWithBiometric(outcome.cipher) == BiometricUnlockResult.TurnedOff) {
+                            bioMessage = "Fingerprint unlock was turned off because it no longer matches this vault. " +
+                                "Unlock with your master password, then turn it on again in Settings."
+                        }
+                        busy = false
+                    }
+                    BiometricOutcome.Cancelled -> runCatching { focus.requestFocus() }
+                    is BiometricOutcome.Error -> bioMessage = outcome.message
+                }
+            } finally {
+                bioBusy = false
+            }
+        }
+    }
 
     BackHandler(onBack = onCloseApp)
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) {
+        if (bioUsable) {
+            // Once per lock, and only once PassMan is really on screen (not while the phone is
+            // asleep or the app is in the background). Cancelling doesn't bring it back.
+            lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+            useFingerprint()
+        } else {
+            runCatching { focus.requestFocus() }
+        }
+    }
     LaunchedEffect(waitMillis > 0) {
         while (waitMillis > 0) {
             delay(250)
@@ -226,6 +281,27 @@ fun UnlockScreen(vault: VaultRepository, onCloseApp: () -> Unit) {
             enabled = password.isNotEmpty() && waitMillis <= 0,
             onClick = ::submit,
         )
+        if (bioUsable && !damaged) {
+            Spacer(Modifier.height(4.dp))
+            OutlinedButton(
+                onClick = ::useFingerprint,
+                enabled = !busy && !bioBusy,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Icon(Icons.Outlined.Fingerprint, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Use fingerprint")
+            }
+        }
+        bioMessage?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
         if (damaged) {
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = restore) { Text("Restore from a backup") }

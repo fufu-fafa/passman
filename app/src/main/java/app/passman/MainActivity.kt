@@ -7,15 +7,16 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.fragment.app.FragmentActivity
 import app.passman.ui.NoKeyboardLearning
 import app.passman.ui.PassManRoot
 import app.passman.ui.PassManTheme
 
-class MainActivity : ComponentActivity() {
+/** A FragmentActivity (a ComponentActivity) because BiometricPrompt needs one. */
+class MainActivity : FragmentActivity() {
     private val app get() = application as PassManApp
 
     override fun onCreate(savedInstanceState: Bundle?) {

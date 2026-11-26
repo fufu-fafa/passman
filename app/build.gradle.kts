@@ -72,6 +72,7 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.bouncycastle.prov)
+    implementation(libs.biometric)
 
     testImplementation(libs.junit)
 }

@@ -2,7 +2,13 @@
 
 **Goal:** let the user unlock PassMan with a fingerprint instead of typing the master password.
 
-**Status:** not started. PassMan v1 is built, tested on a Galaxy S21 FE, and documented in
+**Status:** done (2026-11-26), built as described below with `androidx.biometric` 1.4.0-rc01.
+Tested on the S21 FE: enable, fingerprint unlock, cancel → password, change password and restore
+turn it off, a key that no longer matches the vault turns it off (never "damaged"), screen off
+during the prompt locks, and the R8-minified build works. Not tested yet: test plan steps 3
+(Android lockout after 5 wrong fingers) and 4 (adding a fingerprint invalidates the key).
+
+PassMan v1 is built, tested on a Galaxy S21 FE, and documented in
 `README.md`. Read the README's security table first: this change works inside that design.
 
 **Scope note:** the PRD (Claude Doc, "PassMan: Product Requirements Document") answered

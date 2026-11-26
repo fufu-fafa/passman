@@ -49,6 +49,7 @@ revealed, and copies it in one tap. Search never looks at Password or Code.
 | Saves | Written to a temp file, `fsync`ed, then renamed over the vault, so a crash leaves either the old or the new vault |
 | Backups | A backup is a byte-for-byte copy of the encrypted vault, opened with the master password that protected it. Restore verifies the backup fully and asks before replacing anything |
 | Lock | Manual; after 5 min idle; 1 min in the background; on screen off; when the app is closed with Back. Locking zeroes the vault key and drops all decrypted entries and unsaved edits |
+| Fingerprint unlock | Optional (Settings). A second copy of the vault key, wrapped by an Android Keystore AES-256-GCM key (StrongBox when available) that needs a strong (Class 3) fingerprint for every use, stored in `files/biometric.bin`. No phone PIN/pattern fallback. It skips Argon2id, so unlocking is faster. Adding a fingerprint, changing the master password or restoring a backup turns it off. The master password still works and still protects backups |
 | Unlock delays | 3 free attempts, then 5 s, 15 s, 30 s, 60 s, 2 min, capped at 5 min. Wrong guesses on the unlock screen, in Change master password and when opening a backup all count. Measured on the uptime clock, so changing the date and time doesn't skip a wait; a reboot restarts the current wait. Persisted across restarts. The vault is never erased |
 | Clipboard | Passwords and codes are flagged sensitive (kept out of clipboard previews and history where Android honours it) and cleared after 30 s or when the vault locks, whichever comes first |
 | Keyboard | Every text field asks the keyboard not to learn from it (`IME_FLAG_NO_PERSONALIZED_LEARNING`); password fields are also typed as passwords |
@@ -74,6 +75,10 @@ nonce, wrapped key (48 bytes), data nonce, then the encrypted entry list. See
   history may ignore the sensitive flag.
 - **Keyboard learning:** the no-learning flag is a request to the keyboard. Gboard documents
   honouring it; other keyboards, Samsung Keyboard included, may or may not.
+- **Fingerprint unlock:** it relies on the phone's Keystore and secure hardware (TEE/StrongBox).
+  Face unlock on most phones (including the S21 FE) is Class 2 and can't release a Keystore key,
+  so it isn't offered. Wrong fingers count toward Android's own lockout, not PassMan's unlock
+  delays.
 - **Idle timer:** the 5-minute idle lock runs while PassMan is on screen. Screen-off and the
   1-minute background lock cover the other cases.
 - **Offline guessing:** unlock delays only apply in the app. Anyone with a copy of the vault or a

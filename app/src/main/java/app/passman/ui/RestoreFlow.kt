@@ -155,11 +155,12 @@ fun rememberRestoreFlow(vault: VaultRepository, currentEntryCount: Int?, onResto
                     TextButton(
                         onClick = {
                             step = RestoreStep.Confirm(s.pending, busy = true)
+                            val hadFingerprint = vault.biometricEnabled.value
                             scope.launch {
                                 try {
                                     vault.restore(s.pending)
                                     step = RestoreStep.Idle
-                                    notify("Backup restored")
+                                    notify(if (hadFingerprint) "Backup restored. Fingerprint unlock was turned off." else "Backup restored")
                                     onRestored()
                                 } catch (e: IOException) {
                                     s.pending.discard()
