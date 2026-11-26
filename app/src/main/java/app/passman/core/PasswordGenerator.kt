@@ -41,4 +41,33 @@ object PasswordGenerator {
         }
         return String(chars).also { chars.fill('\u0000') }
     }
+
+    const val CONSONANTS = "bcdfghjklmnpqrstvwxz"
+    const val VOWELS = "aeiouy"
+    const val GROUPS = 3
+    const val GROUP_LENGTH = 6
+    const val MEMORABLE_LENGTH = GROUPS * GROUP_LENGTH + GROUPS - 1
+
+    /**
+     * Apple-style strong password, e.g. `vadpyb-Gofzi1-xydjuk`: three pronounceable groups of six
+     * (consonant-vowel-consonant-consonant-vowel-consonant) joined by hyphens, with exactly one
+     * uppercase letter and one digit at the start or end of a group. About 71 bits of entropy.
+     */
+    fun generateMemorable(random: SecureRandom = defaultRandom): String {
+        fun pick(set: String) = set[random.nextInt(set.length)]
+        val groups = Array(GROUPS) {
+            CharArray(GROUP_LENGTH) { i -> pick(if (i == 1 || i == 4) VOWELS else CONSONANTS) }
+        }
+        val digitGroup = random.nextInt(GROUPS)
+        val digitPos = if (random.nextBoolean()) 0 else GROUP_LENGTH - 1
+        groups[digitGroup][digitPos] = pick(DIGITS)
+        while (true) {
+            val g = random.nextInt(GROUPS)
+            val p = random.nextInt(GROUP_LENGTH)
+            if (g == digitGroup && p == digitPos) continue
+            groups[g][p] = groups[g][p].uppercaseChar()
+            break
+        }
+        return groups.joinToString("-") { String(it) }.also { groups.forEach { it.fill('\u0000') } }
+    }
 }

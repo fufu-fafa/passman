@@ -27,6 +27,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -238,13 +241,15 @@ private fun LimitedField(
 /** FR-11. */
 @Composable
 private fun GeneratorDialog(onDismiss: () -> Unit, onUse: (String) -> Unit) {
+    var memorable by remember { mutableStateOf(true) }
     var length by remember { mutableIntStateOf(PasswordGenerator.DEFAULT_LENGTH) }
     var letters by remember { mutableStateOf(true) }
     var digits by remember { mutableStateOf(true) }
     var symbols by remember { mutableStateOf(true) }
     var nonce by remember { mutableIntStateOf(0) }
-    val generated = remember(length, letters, digits, symbols, nonce) {
-        PasswordGenerator.generate(length, letters, digits, symbols)
+    val generated = remember(memorable, length, letters, digits, symbols, nonce) {
+        if (memorable) PasswordGenerator.generateMemorable()
+        else PasswordGenerator.generate(length, letters, digits, symbols)
     }
 
     AlertDialog(
@@ -252,6 +257,18 @@ private fun GeneratorDialog(onDismiss: () -> Unit, onUse: (String) -> Unit) {
         title = { Text("Generate password") },
         text = {
             Column {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                    SegmentedButton(
+                        selected = memorable,
+                        onClick = { memorable = true },
+                        shape = SegmentedButtonDefaults.itemShape(0, 2),
+                    ) { Text("Strong") }
+                    SegmentedButton(
+                        selected = !memorable,
+                        onClick = { memorable = false },
+                        shape = SegmentedButtonDefaults.itemShape(1, 2),
+                    ) { Text("Custom") }
+                }
                 Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
                     Row(Modifier.fillMaxWidth().padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -263,16 +280,24 @@ private fun GeneratorDialog(onDismiss: () -> Unit, onUse: (String) -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Text("Length: $length", style = MaterialTheme.typography.labelLarge)
-                Slider(
-                    value = length.toFloat(),
-                    onValueChange = { length = Math.round(it) },
-                    valueRange = PasswordGenerator.MIN_LENGTH.toFloat()..PasswordGenerator.MAX_LENGTH.toFloat(),
-                )
-                // At least one character set stays on.
-                CheckRow("Letters (A–Z, a–z)", letters) { if (it || digits || symbols) letters = it }
-                CheckRow("Numbers (0–9)", digits) { if (it || letters || symbols) digits = it }
-                CheckRow("Symbols (!@#…)", symbols) { if (it || letters || digits) symbols = it }
+                if (memorable) {
+                    Text(
+                        "20 characters in three easy-to-read groups, with one capital letter and one number. Works on almost every site.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text("Length: $length", style = MaterialTheme.typography.labelLarge)
+                    Slider(
+                        value = length.toFloat(),
+                        onValueChange = { length = Math.round(it) },
+                        valueRange = PasswordGenerator.MIN_LENGTH.toFloat()..PasswordGenerator.MAX_LENGTH.toFloat(),
+                    )
+                    // At least one character set stays on.
+                    CheckRow("Letters (A–Z, a–z)", letters) { if (it || digits || symbols) letters = it }
+                    CheckRow("Numbers (0–9)", digits) { if (it || letters || symbols) digits = it }
+                    CheckRow("Symbols (!@#…)", symbols) { if (it || letters || digits) symbols = it }
+                }
             }
         },
         confirmButton = { TextButton(onClick = { onUse(generated) }) { Text("Use password") } },

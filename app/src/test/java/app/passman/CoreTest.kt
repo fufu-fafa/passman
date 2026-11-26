@@ -271,6 +271,23 @@ class CoreTest {
         assertEquals(30, PasswordGenerator.generate(30, false, false, false).count { it.isLetter() })
     }
 
+    @Test fun `memorable generator matches Apple style`() {
+        val shape = Regex("^[a-zA-Z0-9]{6}-[a-zA-Z0-9]{6}-[a-zA-Z0-9]{6}$")
+        val seen = HashSet<String>()
+        repeat(500) {
+            val p = PasswordGenerator.generateMemorable()
+            assertEquals(PasswordGenerator.MEMORABLE_LENGTH, p.length)
+            assertTrue(p, shape.matches(p))
+            assertEquals(p, 1, p.count { it.isUpperCase() })
+            assertEquals(p, 1, p.count { it.isDigit() })
+            assertEquals(16, p.count { it.isLowerCase() })
+            val digitAt = p.indexOfFirst { it.isDigit() }
+            assertTrue(p, digitAt in setOf(0, 5, 7, 12, 14, 19))
+            seen += p
+        }
+        assertEquals(500, seen.size)
+    }
+
     // ---- Website ----
 
     @Test fun `website rules`() {
