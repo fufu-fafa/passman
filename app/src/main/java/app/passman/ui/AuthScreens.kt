@@ -99,9 +99,13 @@ fun SetupScreen(vault: VaultRepository) {
         attempted = true
         if (!valid || busy) return
         busy = true
+        val chars = password.toPasswordChars()
+        // Drop the typed text now; create() zeroes chars when done.
+        password = ""
+        confirm = ""
         scope.launch {
             try {
-                vault.create(password.toPasswordChars())
+                vault.create(chars)
             } catch (e: Exception) {
                 busy = false
                 notify("Couldn't create the vault")
@@ -175,11 +179,13 @@ fun UnlockScreen(vault: VaultRepository, onCloseApp: () -> Unit) {
         if (password.isEmpty() || busy || waitMillis > 0) return
         busy = true
         error = null
+        val chars = password.toPasswordChars()
+        // Drop the typed text now; unlock() zeroes chars when done.
+        password = ""
         scope.launch {
-            when (val r = vault.unlock(password.toPasswordChars())) {
+            when (val r = vault.unlock(chars)) {
                 UnlockResult.Success -> Unit // The root switches screens.
                 UnlockResult.WrongPassword -> {
-                    password = ""
                     error = "Wrong master password"
                     waitMillis = vault.unlockWaitMillis()
                 }

@@ -134,6 +134,17 @@ class CoreTest {
         }
     }
 
+    @Test fun `memory cost above 256 MiB is refused and 256 MiB is accepted`() {
+        val (file, _) = VaultCrypto.create(pw, emptyList(), fast)
+        fun withMemory(kib: Int) = file.copyOf().also { java.nio.ByteBuffer.wrap(it).putInt(5, kib) }
+        try {
+            VaultCrypto.readParams(withMemory(256 * 1024 + 1))
+            fail()
+        } catch (e: CorruptVaultException) {
+        }
+        assertEquals(256 * 1024, VaultCrypto.readParams(withMemory(256 * 1024)).memoryKiB)
+    }
+
     @Test fun `argon2id matches the reference implementation test vector`() {
         // phc-winner-argon2 test.c: Argon2id v1.3, t=2, m=2^16 KiB, p=1, "password", "somesalt".
         val key = VaultCrypto.deriveKek("password".toCharArray(), "somesalt".toByteArray(), KdfParams(65536, 2, 1))
@@ -266,5 +277,19 @@ class CoreTest {
         assertEquals(2_000, UnlockThrottle.remainingMillis(3, lastFailureAt = 10_000, now = 13_000))
         assertEquals(0, UnlockThrottle.remainingMillis(3, lastFailureAt = 10_000, now = 20_000))
         assertNotNull(UnlockThrottle.remainingMillis(3, lastFailureAt = 10_000, now = 0))
+    }
+
+    @Test fun `a reboot restarts the wait instead of skipping it`() {
+        // Same boot: measured from the recorded failure.
+        assertEquals(10_000, UnlockThrottle.failureTimeFor(10_000, lastFailureBoot = 7, now = 12_000, boot = 7))
+        // New boot (uptime clock restarted): the wait starts again from now.
+        assertEquals(500, UnlockThrottle.failureTimeFor(10_000, lastFailureBoot = 7, now = 500, boot = 8))
+        assertEquals(50_000, UnlockThrottle.failureTimeFor(10_000, lastFailureBoot = 7, now = 50_000, boot = 8))
+        // Missing, legacy or impossible values also restart it.
+        assertEquals(500, UnlockThrottle.failureTimeFor(-1, lastFailureBoot = Int.MIN_VALUE, now = 500, boot = 3))
+        assertEquals(500, UnlockThrottle.failureTimeFor(9_000, lastFailureBoot = -1, now = 500, boot = -1))
+        // So after a reboot the full delay applies.
+        val from = UnlockThrottle.failureTimeFor(10_000, 7, now = 500, boot = 8)
+        assertEquals(300_000, UnlockThrottle.remainingMillis(9, from, now = 500))
     }
 }

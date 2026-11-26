@@ -16,6 +16,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Installs beside the real app, never over it: a debuggable build can't reach (or
+            // replace) the vault of app.passman. Its own name is in src/debug/res.
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

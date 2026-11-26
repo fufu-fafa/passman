@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Debug builds install as app.passman.debug; the name tells them apart on the phone. -->
+    <string name="app_name">PassMan Debug</string>
+</resources>

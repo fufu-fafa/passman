@@ -16,7 +16,8 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 The release build is minified and signed with the local debug key (personal sideload). It sets
 `FLAG_SECURE`, so screenshots and screen recordings are blocked. The debug build allows `adb`
 screenshots for testing (`app/src/debug/res/values/bools.xml`); app-switcher previews are hidden
-in both.
+in both. The debug build installs as `app.passman.debug` ("PassMan Debug") beside the real app,
+so a debuggable build never sits over, or can read, the real vault.
 
 The project avoids Java sources (no `BuildConfig`): `jlink` from the Homebrew JDK 27 fails on
 AGP's javac step, while Kotlin-only builds work.
@@ -48,8 +49,10 @@ revealed, and copies it in one tap. Search never looks at Password or Code.
 | Saves | Written to a temp file, `fsync`ed, then renamed over the vault, so a crash leaves either the old or the new vault |
 | Backups | A backup is a byte-for-byte copy of the encrypted vault, opened with the master password that protected it. Restore verifies the backup fully and asks before replacing anything |
 | Lock | Manual; after 5 min idle; 1 min in the background; on screen off; when the app is closed with Back. Locking zeroes the vault key and drops all decrypted entries and unsaved edits |
-| Unlock delays | 3 free attempts, then 5 s, 15 s, 30 s, 60 s, 2 min, capped at 5 min. Persisted across restarts. The vault is never erased |
-| Clipboard | Passwords and codes are flagged sensitive (kept out of clipboard previews and history where Android honours it) and cleared after 30 s |
+| Unlock delays | 3 free attempts, then 5 s, 15 s, 30 s, 60 s, 2 min, capped at 5 min. Wrong guesses on the unlock screen, in Change master password and when opening a backup all count. Measured on the uptime clock, so changing the date and time doesn't skip a wait; a reboot restarts the current wait. Persisted across restarts. The vault is never erased |
+| Clipboard | Passwords and codes are flagged sensitive (kept out of clipboard previews and history where Android honours it) and cleared after 30 s or when the vault locks, whichever comes first |
+| Keyboard | Every text field asks the keyboard not to learn from it (`IME_FLAG_NO_PERSONALIZED_LEARNING`); password fields are also typed as passwords |
+| Hostile files | Key settings in a vault or backup are capped (Argon2 memory ≤ 256 MiB, ≤ 20 iterations); a file that still needs more memory than the phone allows is reported as damaged instead of crashing |
 | Privacy | No `INTERNET` permission, no analytics, no logging of entry data, Android backup and device transfer disabled, autofill excluded, UI state never saved to the instance bundle |
 
 File format (big-endian): `"PMV1"`, version, Argon2 memory/iterations/parallelism, salt, wrap
@@ -59,13 +62,18 @@ nonce, wrapped key (48 bytes), data nonce, then the encrypted entry list. See
 ## Platform limits
 
 - **Memory:** Kotlin/Compose text fields use immutable `String`s, which can't be zeroed. PassMan
-  zeroes the key and its own byte buffers and drops every reference on lock; the remaining copies
-  are freed by the garbage collector.
+  zeroes the key, its own byte buffers and the password character arrays, clears password fields
+  as soon as they're submitted, and drops every reference on lock; the remaining copies are
+  unreachable and freed by the next garbage collection. Until then a debugger or root memory dump
+  can still find them.
 - **Clipboard clearing:** Android only lets the focused app read the clipboard. With PassMan in
   front, it clears only its own copied value. In the background it can't check, so after 30 s it
-  clears the clipboard anyway, even if you copied something else in another app since. If Android
-  kills the app within those 30 s, the copied value stays. Keyboards with their own clipboard
+  clears the clipboard anyway, even if you copied something else in another app since. The same
+  applies when the vault locks in the background. If Android kills the app before either, the
+  copied value stays. Keyboards with their own clipboard
   history may ignore the sensitive flag.
+- **Keyboard learning:** the no-learning flag is a request to the keyboard. Gboard documents
+  honouring it; other keyboards, Samsung Keyboard included, may or may not.
 - **Idle timer:** the 5-minute idle lock runs while PassMan is on screen. Screen-off and the
   1-minute background lock cover the other cases.
 - **Offline guessing:** unlock delays only apply in the app. Anyone with a copy of the vault or a

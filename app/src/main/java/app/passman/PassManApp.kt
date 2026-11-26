@@ -24,6 +24,8 @@ class PassManApp : Application() {
         vault = VaultRepository(this)
         clipboard = SecureClipboard(this)
         autoLock = AutoLock(vault)
+        // SEC-7: a copied password or code doesn't outlive the unlocked session.
+        vault.onLock = clipboard::clearNow
         // SEC-5: lock when the screen turns off (device sleep or screen lock).
         registerReceiver(
             object : BroadcastReceiver() {

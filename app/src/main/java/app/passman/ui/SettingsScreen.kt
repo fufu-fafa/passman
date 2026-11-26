@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import app.passman.data.UnlockResult
 import app.passman.data.VaultRepository
 import app.passman.data.VaultState
 import kotlinx.coroutines.Dispatchers
@@ -163,21 +164,26 @@ private fun ChangePasswordDialog(vault: VaultRepository, onDone: () -> Unit) {
         attempted = true
         if (!valid || busy) return
         busy = true
+        val currentChars = current.toPasswordChars()
+        // Drop the typed current password now; changePassword() zeroes both arrays when done.
+        current = ""
         scope.launch {
-            val ok = try {
-                vault.changePassword(current.toPasswordChars(), new.toPasswordChars())
+            val result = try {
+                vault.changePassword(currentChars, new.toPasswordChars())
             } catch (e: Exception) {
                 busy = false
                 notify("Couldn't change the master password")
                 return@launch
             }
             busy = false
-            if (ok) {
-                notify("Master password changed")
-                onDone()
-            } else {
-                current = ""
-                currentError = "Wrong current password"
+            when (result) {
+                UnlockResult.Success -> {
+                    notify("Master password changed")
+                    onDone()
+                }
+                UnlockResult.WrongPassword -> currentError = "Wrong current password"
+                is UnlockResult.Throttled -> currentError = "Too many attempts. Try again in ${(result.waitMillis + 999) / 1000} s."
+                is UnlockResult.Damaged -> currentError = result.reason
             }
         }
     }

@@ -12,13 +12,15 @@ import android.os.PersistableBundle
 /**
  * Copies values to the clipboard. Passwords and codes are flagged sensitive (kept out of the
  * clipboard preview, Samsung/Gboard clipboard history and cross-device sync where Android honours
- * the flag) and cleared after 30 seconds if the clipboard still holds them (SEC-7).
+ * the flag) and cleared after 30 seconds, or when the vault locks if that comes first, if the
+ * clipboard still holds them (SEC-7). A copy is not cleared if Android kills the process first.
  */
 class SecureClipboard(context: Context) {
     private val clipboard = context.getSystemService(ClipboardManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private var pendingLabel: String? = null
     private var copyCounter = 0L
+    private val clearRunnable = Runnable { clearIfStillOurs() }
 
     fun copyPlain(label: String, text: String) {
         clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
@@ -33,8 +35,19 @@ class SecureClipboard(context: Context) {
         }
         clipboard.setPrimaryClip(clip)
         pendingLabel = uniqueLabel
-        handler.removeCallbacksAndMessages(null)
-        handler.postDelayed(::clearIfStillOurs, CLEAR_AFTER_MS)
+        handler.removeCallbacks(clearRunnable)
+        handler.postDelayed(clearRunnable, CLEAR_AFTER_MS)
+    }
+
+    /**
+     * Clears a copied secret now instead of waiting out the 30 s (called when the vault locks).
+     * Safe from any thread. Does nothing if no secret is pending.
+     */
+    fun clearNow() {
+        handler.post {
+            handler.removeCallbacks(clearRunnable)
+            clearIfStillOurs()
+        }
     }
 
     private fun clearIfStillOurs() {

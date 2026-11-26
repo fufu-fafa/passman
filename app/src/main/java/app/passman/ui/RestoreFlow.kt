@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import app.passman.core.CorruptVaultException
 import app.passman.core.WrongPasswordException
 import app.passman.data.PendingRestore
+import app.passman.data.ThrottledException
 import app.passman.data.VaultRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -84,9 +85,14 @@ fun rememberRestoreFlow(vault: VaultRepository, currentEntryCount: Int?, onResto
             fun submit() {
                 if (password.isEmpty() || s.busy) return
                 step = RestoreStep.AskPassword(s.bytes, busy = true)
+                val chars = password.toPasswordChars()
+                // Drop the typed text now; openBackup() zeroes chars when done.
+                password = ""
                 scope.launch {
                     step = try {
-                        RestoreStep.Confirm(vault.openBackup(s.bytes, password.toPasswordChars()))
+                        RestoreStep.Confirm(vault.openBackup(s.bytes, chars))
+                    } catch (e: ThrottledException) {
+                        RestoreStep.AskPassword(s.bytes, error = "Too many attempts. Try again in ${(e.waitMillis + 999) / 1000} s.")
                     } catch (e: WrongPasswordException) {
                         RestoreStep.AskPassword(s.bytes, error = "Wrong master password for this backup")
                     } catch (e: CorruptVaultException) {

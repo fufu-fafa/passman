@@ -1,5 +1,10 @@
 package app.passman.ui
 
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -96,7 +101,34 @@ fun BusyButton(text: String, busy: Boolean, enabled: Boolean, onClick: () -> Uni
     }
 }
 
-/** Copies the characters of [s] into a fresh array for key derivation. */
+/**
+ * Copies the characters into a fresh array for key derivation; the VaultRepository call it is
+ * passed to zeroes it. The String itself can't be wiped, so callers clear the field's state
+ * right after (it then lingers in memory only until garbage collection).
+ */
 fun String.toPasswordChars(): CharArray = toCharArray()
+
+/**
+ * Asks every keyboard to treat every PassMan text field as incognito
+ * ([EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING]): no learning words from, or suggesting,
+ * user names, notes or anything else typed here. Password fields are also typed as passwords.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun NoKeyboardLearning(content: @Composable () -> Unit) {
+    InterceptPlatformTextInput(
+        interceptor = { request, nextHandler ->
+            val incognito = object : PlatformTextInputMethodRequest {
+                override fun createInputConnection(outAttrs: EditorInfo): InputConnection {
+                    val connection = request.createInputConnection(outAttrs)
+                    outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                    return connection
+                }
+            }
+            nextHandler.startInputMethod(incognito)
+        },
+        content = content,
+    )
+}
 
 const val MIN_MASTER_PASSWORD = 12

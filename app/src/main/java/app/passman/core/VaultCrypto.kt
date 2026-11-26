@@ -27,8 +27,10 @@ data class KdfParams(val memoryKiB: Int, val iterations: Int, val parallelism: I
         val DEFAULT = KdfParams(memoryKiB = 64 * 1024, iterations = 3, parallelism = 4)
 
         // Bounds applied to files we read, so a crafted backup cannot demand absurd resources.
+        // 256 MiB is 4x the default and still fits a phone's app heap; [VaultCrypto.open] also
+        // turns an OutOfMemoryError into CorruptVaultException in case a phone allows less.
         const val MIN_MEMORY_KIB = 8
-        const val MAX_MEMORY_KIB = 512 * 1024
+        const val MAX_MEMORY_KIB = 256 * 1024
         const val MAX_ITERATIONS = 20
         const val MAX_PARALLELISM = 16
     }
@@ -160,7 +162,11 @@ object VaultCrypto {
      */
     fun open(file: ByteArray, password: CharArray): OpenedVault {
         val header = parseHeader(file)
-        val kek = deriveKek(password, header.salt, header.params)
+        val kek = try {
+            deriveKek(password, header.salt, header.params)
+        } catch (e: OutOfMemoryError) {
+            throw CorruptVaultException("This vault's key settings need more memory than the phone allows")
+        }
         val vaultKey = try {
             gcm(Cipher.DECRYPT_MODE, kek, header.wrapNonce, file.copyOfRange(0, header.prefixEnd), header.wrapped)
         } catch (e: AEADBadTagException) {

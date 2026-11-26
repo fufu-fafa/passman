@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import app.passman.ui.NoKeyboardLearning
 import app.passman.ui.PassManRoot
 import app.passman.ui.PassManTheme
 
@@ -34,14 +35,16 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             PassManTheme {
-                PassManRoot(
-                    vault = app.vault,
-                    clipboard = app.clipboard,
-                    onCloseApp = {
-                        app.vault.lock()
-                        finish()
-                    },
-                )
+                NoKeyboardLearning {
+                    PassManRoot(
+                        vault = app.vault,
+                        clipboard = app.clipboard,
+                        onCloseApp = {
+                            app.vault.lock()
+                            finish()
+                        },
+                    )
+                }
             }
         }
     }
