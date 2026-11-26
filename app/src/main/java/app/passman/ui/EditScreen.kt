@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Casino
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -83,6 +84,7 @@ fun EditScreen(
     var saving by remember { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
     var generator by remember { mutableStateOf(false) }
+    var scanner by remember { mutableStateOf(false) }
     val titleFocus = remember { FocusRequester() }
 
     val draft = base.copy(title = title, userName = userName, password = password, code = code, website = website, notes = notes)
@@ -159,9 +161,12 @@ fun EditScreen(
                 label = "2FA setup key",
                 maxLength = Limits.CODE,
                 isError = codeError,
+                trailingExtra = {
+                    IconButton(onClick = { scanner = true }, modifier = Modifier.focusProperties { canFocus = false }) { Icon(Icons.Outlined.QrCodeScanner, contentDescription = "Scan QR code") }
+                },
                 supportingText = when {
-                    codeError -> "Not a valid setup key. Paste the secret (letters A–Z, 2–7) or an otpauth:// link."
-                    code.isBlank() -> "Optional. The secret shown when you set up two-factor sign-in; PassMan shows the rotating code."
+                    codeError -> "Not a valid setup key. Scan the QR code, or paste the secret (letters A–Z, 2–7) or an otpauth:// link."
+                    code.isBlank() -> "Optional. Scan the QR code shown when you set up two-factor sign-in, or paste its secret; PassMan shows the rotating code."
                     else -> "Valid setup key · the entry shows the rotating code"
                 },
                 modifier = Modifier.padding(top = 4.dp),
@@ -186,6 +191,17 @@ fun EditScreen(
             text = { Text("Your unsaved changes to this entry will be lost.") },
             confirmButton = { TextButton(onClick = onClose) { Text("Discard", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing") } },
+        )
+    }
+
+    if (scanner) {
+        QrScanDialog(
+            onDismiss = { scanner = false },
+            onScanned = { key, fromImage ->
+                code = key
+                scanner = false
+                notify(if (fromImage) "2FA setup key added. You can delete the screenshot now." else "2FA setup key added")
+            },
         )
     }
 

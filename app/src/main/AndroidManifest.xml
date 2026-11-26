@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- SEC-9: no INTERNET permission; PassMan makes no network requests. -->
+
+    <!-- Scanning 2FA setup QR codes. Optional: a screenshot can be scanned instead. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Pulled in by CameraX (media3); PassMan never uses the network (SEC-9). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
 
     <!-- Lets FR-10 find a browser to hand http/https links to on Android 11+. -->
     <queries>

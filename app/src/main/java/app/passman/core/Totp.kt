@@ -31,6 +31,23 @@ object Totp {
 
     fun isValid(raw: String): Boolean = parse(raw) != null
 
+    /**
+     * A scanned otpauth:// URI as it should be stored in the Code field: unchanged when it fits in
+     * [maxLength], otherwise rebuilt with only the parameters that affect the code (the label and
+     * issuer can make it long). Null when [raw] is not a valid setup key.
+     */
+    fun fitSetupKey(raw: String, maxLength: Int): String? {
+        val input = raw.trim()
+        if (parse(input) == null) return null
+        if (input.length <= maxLength) return input
+        if (!input.startsWith("otpauth://", ignoreCase = true)) return null
+        val query = URI(input).rawQuery ?: return null
+        val kept = query.split('&').filter { part ->
+            part.substringBefore('=').lowercase() in setOf("secret", "digits", "period", "algorithm")
+        }
+        return ("otpauth://totp/?" + kept.joinToString("&")).takeIf { it.length <= maxLength && parse(it) != null }
+    }
+
     private fun parseUri(input: String): TotpConfig? {
         val uri = runCatching { URI(input) }.getOrNull() ?: return null
         if (!uri.host.equals("totp", ignoreCase = true)) return null
@@ -79,6 +96,23 @@ object Totp {
 /** RFC 4648 Base32 decoding, tolerant of spaces, hyphens, lowercase and padding. */
 object Base32 {
     private const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+    /** Unpadded, as in otpauth:// URIs. */
+    fun encode(bytes: ByteArray): String {
+        val out = StringBuilder((bytes.size * 8 + 4) / 5)
+        var buffer = 0
+        var bits = 0
+        for (b in bytes) {
+            buffer = (buffer shl 8) or (b.toInt() and 0xff)
+            bits += 8
+            while (bits >= 5) {
+                out.append(ALPHABET[(buffer shr (bits - 5)) and 31])
+                bits -= 5
+            }
+        }
+        if (bits > 0) out.append(ALPHABET[(buffer shl (5 - bits)) and 31])
+        return out.toString()
+    }
 
     fun decode(input: String): ByteArray? {
         val clean = input.filterNot { it == ' ' || it == '-' || it == '=' }.uppercase()

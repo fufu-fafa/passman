@@ -271,6 +271,102 @@ class CoreTest {
         assertEquals(30, PasswordGenerator.generate(30, false, false, false).count { it.isLetter() })
     }
 
+    // ---- QR scanning ----
+
+    private fun qr(text: String, size: Int = 300): com.google.zxing.common.BitMatrix =
+        com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, size, size)
+
+    @Test fun `qr decoder reads camera frames and images, normal and inverted`() {
+        val uri = "otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example"
+        val m = qr(uri)
+        val n = m.width * m.height
+        val luma = ByteArray(n) { i -> if (m[i % m.width, i / m.width]) 0 else -1 }
+        assertEquals(uri, app.passman.core.QrDecoder.decodeLuminance(luma, m.width, m.height))
+        val argb = IntArray(n) { i -> if (m[i % m.width, i / m.width]) 0xFF000000.toInt() else -1 }
+        assertEquals(uri, app.passman.core.QrDecoder.decodeArgb(argb, m.width, m.height))
+        val inverted = IntArray(n) { i -> argb[i].inv() or 0xFF000000.toInt() }
+        assertEquals(uri, app.passman.core.QrDecoder.decodeArgb(inverted, m.width, m.height))
+        assertNull(app.passman.core.QrDecoder.decodeArgb(IntArray(n) { -1 }, m.width, m.height))
+    }
+
+    @Test fun `scanned setup keys fit the code field`() {
+        val short = "otpauth://totp/Example:alice?secret=JBSWY3DPEHPK3PXP&issuer=Example&digits=8"
+        assertEquals(short, Totp.fitSetupKey(" $short ", 256))
+        val long = "otpauth://totp/" + "a".repeat(300) + "?secret=JBSWY3DPEHPK3PXP&issuer=" + "b".repeat(100) + "&digits=8&period=60"
+        val fitted = Totp.fitSetupKey(long, 256)!!
+        assertEquals("otpauth://totp/?secret=JBSWY3DPEHPK3PXP&digits=8&period=60", fitted)
+        assertEquals(Totp.code(Totp.parse(long)!!, 1_700_000_000_000), Totp.code(Totp.parse(fitted)!!, 1_700_000_000_000))
+        assertNull(Totp.fitSetupKey("https://example.com", 256))
+        assertNull(Totp.fitSetupKey("otpauth://hotp/x?secret=JBSWY3DPEHPK3PXP", 256))
+    }
+
+    // Minimal protobuf writer for Google Authenticator MigrationPayload test data.
+    private fun pbVarint(out: java.io.ByteArrayOutputStream, v: Long) {
+        var x = v
+        while (x and 0x7fL.inv() != 0L) { out.write(((x and 0x7f) or 0x80).toInt()); x = x ushr 7 }
+        out.write(x.toInt())
+    }
+    private fun pbBytes(out: java.io.ByteArrayOutputStream, field: Int, b: ByteArray) {
+        pbVarint(out, (field shl 3 or 2).toLong()); pbVarint(out, b.size.toLong()); out.write(b)
+    }
+    private fun pbInt(out: java.io.ByteArrayOutputStream, field: Int, v: Long) {
+        pbVarint(out, (field shl 3).toLong()); pbVarint(out, v)
+    }
+    private fun gaAccount(secret: ByteArray, name: String, issuer: String, algorithm: Long = 1, digits: Long = 1, type: Long = 2) =
+        java.io.ByteArrayOutputStream().apply {
+            pbBytes(this, 1, secret); pbBytes(this, 2, name.toByteArray()); pbBytes(this, 3, issuer.toByteArray())
+            pbInt(this, 4, algorithm); pbInt(this, 5, digits); pbInt(this, 6, type)
+        }.toByteArray()
+    private fun gaExport(accounts: List<ByteArray>, batchSize: Long = 1, batchIndex: Long = 0): String {
+        val payload = java.io.ByteArrayOutputStream().apply {
+            accounts.forEach { pbBytes(this, 1, it) }
+            pbInt(this, 2, 1); pbInt(this, 3, batchSize); pbInt(this, 4, batchIndex); pbInt(this, 5, 12345)
+        }.toByteArray()
+        return "otpauth-migration://offline?data=" + java.net.URLEncoder.encode(java.util.Base64.getEncoder().encodeToString(payload), "UTF-8")
+    }
+
+    @Test fun `base32 encode round-trips`() {
+        assertEquals("MY", Base32.encode("f".toByteArray()))
+        assertEquals("JBSWY3DPEHPK3PXP", Base32.encode(Base32.decode("JBSWY3DPEHPK3PXP")!!))
+        repeat(50) { n -> val b = ByteArray(n) { (it * 37 + n).toByte() }; assertArrayEquals(b, Base32.decode(Base32.encode(b)) ?: ByteArray(0)) }
+    }
+
+    @Test fun `google authenticator export with one account`() {
+        val secret = Base32.decode("JBSWY3DPEHPK3PXP")!!
+        val export = app.passman.core.AuthenticatorExport.parse(gaExport(listOf(gaAccount(secret, "GitHub:alice", "GitHub"))))!!
+        assertEquals(1, export.accounts.size)
+        assertEquals(0, export.skipped)
+        val a = export.accounts[0]
+        assertEquals("GitHub", a.issuer)
+        assertEquals("alice", a.name)
+        val t = 1_700_000_000_000
+        assertEquals(Totp.code(Totp.parse("JBSWY3DPEHPK3PXP")!!, t), Totp.code(Totp.parse(a.setupKey)!!, t))
+    }
+
+    @Test fun `google authenticator export with several accounts and batches`() {
+        val s = ByteArray(20) { it.toByte() }
+        val text = gaExport(
+            listOf(
+                gaAccount(s, "bob@example.com", "Example", algorithm = 2, digits = 2),
+                gaAccount(s, "carol", ""),
+                gaAccount(s, "counter", "Bank", type = 1), // HOTP: skipped
+                gaAccount(s, "old", "Legacy", algorithm = 4), // MD5: skipped
+            ),
+            batchSize = 3, batchIndex = 1,
+        )
+        val export = app.passman.core.AuthenticatorExport.parse(text)!!
+        assertEquals(listOf("Example", ""), export.accounts.map { it.issuer })
+        assertEquals(2, export.skipped)
+        assertEquals(3, export.batchSize)
+        assertEquals(1, export.batchIndex)
+        val cfg = Totp.parse(export.accounts[0].setupKey)!!
+        assertEquals(8, cfg.digits)
+        assertEquals(TotpConfig.Algorithm.SHA256, cfg.algorithm)
+        assertNull(app.passman.core.AuthenticatorExport.parse("otpauth-migration://offline?data=%%%"))
+        assertNull(app.passman.core.AuthenticatorExport.parse("otpauth-migration://offline?data=AQID"))
+        assertNull(app.passman.core.AuthenticatorExport.parse("otpauth://totp/x?secret=JBSWY3DPEHPK3PXP"))
+    }
+
     @Test fun `memorable generator matches Apple style`() {
         val shape = Regex("^[a-zA-Z0-9]{6}-[a-zA-Z0-9]{6}-[a-zA-Z0-9]{6}$")
         val seen = HashSet<String>()

@@ -73,6 +73,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.bouncycastle.prov)
     implementation(libs.biometric)
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.camera.view)
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
 }
