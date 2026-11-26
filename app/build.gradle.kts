@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -15,6 +17,20 @@ android {
         versionName = "1.0.0"
     }
 
+    // Release key details live in keystore.properties (gitignored), like the apps in ~/Desktop/gitrepo/android.
+    val keystoreFile = rootProject.file("keystore.properties")
+    signingConfigs {
+        if (keystoreFile.exists()) {
+            val props = Properties().apply { keystoreFile.inputStream().use(::load) }
+            create("release") {
+                storeFile = rootProject.file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // Installs beside the real app, never over it: a debuggable build can't reach (or
@@ -25,8 +41,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Personal sideloaded build: signed with the local debug key.
-            signingConfig = signingConfigs.getByName("debug")
+            // Without keystore.properties, fall back to the debug key so a release build can still
+            // be made; but anyone holding that debug key could then ship an update over PassMan.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
